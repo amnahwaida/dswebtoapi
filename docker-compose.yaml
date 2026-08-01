@@ -1,0 +1,78 @@
+#version: '3.8'
+
+services:
+  redis:
+    image: redis:alpine
+    container_name: seagull_redis
+#    ports:
+#      - "6379:6379"
+    networks:
+      - seagull_net
+
+  proxy-scraper:
+    build: ./proxy_scraper
+    container_name: seagull_scraper
+    depends_on:
+      - redis
+    environment:
+      - REDIS_URL=redis://redis:6379
+    networks:
+      - seagull_net
+    # Jalanin tiap 10 menit buat refresh proxy sampah
+    command: >
+      sh -c "while true; do python main.py; sleep 600; done"
+
+  api-gateway:
+    build: ./api
+    container_name: seagull_api
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+    environment:
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - ./api:/app
+    networks:
+      - seagull_net
+
+  worker:
+    build: ./worker
+    container_name: seagull_worker
+    depends_on:
+      - redis
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DEEPSEEK_EMAIL=${DEEPSEEK_EMAIL}
+      - DEEPSEEK_PASSWORD=${DEEPSEEK_PASSWORD}
+      - HEADLESS=${HEADLESS:-true}
+      - DEFAULT_SYSTEM_PROMPT=${DEFAULT_SYSTEM_PROMPT}
+    volumes:
+      - ./worker:/app
+      - ./screenshots:/app/screenshots
+      - ./system_prompt.txt:/app/system_prompt.txt
+    networks:
+      - seagull_net
+    # Worker butuh resource lebih buat jalanin Chromium
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: seagull_cloudflared
+    restart: unless-stopped
+    depends_on:
+      - api-gateway
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run
+    networks:
+      - seagull_net
+
+networks:
+  seagull_net:
+    driver: bridge
