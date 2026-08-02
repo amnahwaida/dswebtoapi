@@ -250,7 +250,7 @@ async def process_request(prompt, proxy_str, session_id=None, system_prompt=None
             previous_text = ""
             unchanged_count = 0
 
-            for _ in range(250): # 250 * 400ms = 100 detik max
+            for _ in range(750): # 750 * 400ms = 300 detik max (sesuai API timeout)
                 try:
                     elems = await page.query_selector_all('.ds-assistant-message-main-content, .ds-markdown')
                     # Pastikan elemen balasan BARU telah muncul (jumlah bertambah ATAU teks elemen terakhir berbeda dari sebelum dikirim)

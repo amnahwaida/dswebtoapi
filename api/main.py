@@ -40,9 +40,9 @@ async def chat(req: PromptRequest):
             detail=f"Database Connection Error: Gagal terhubung ke Redis queue service ({str(e)})."
         )
     
-    # Tunggu hasil khusus untuk task_id ini (Timeout 120 detik)
+    # Tunggu hasil khusus untuk task_id ini (Timeout 300 detik untuk DeepThink / balasan panjang)
     result_key = f"result:{task_id}"
-    for _ in range(120):
+    for _ in range(300):
         await asyncio.sleep(1)
         try:
             res = await r.get(result_key)
@@ -73,7 +73,7 @@ async def chat(req: PromptRequest):
             
     return {
         "task_id": task_id,
-        "error": f"Timeout Error: Task {task_id} tidak selesai dalam 120 detik. Kemungkinan worker kehabisan proxy atau terhalang Captcha."
+        "error": f"Timeout Error: Task {task_id} tidak selesai dalam 300 detik. Kemungkinan DeepThink memakan waktu terlalu lama atau worker kehabisan proxy."
     }
 
 @app.get("/health")
