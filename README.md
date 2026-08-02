@@ -84,7 +84,8 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 {
   "task_id": "a88f1ec7-de69-4944-9751-0ac1c4f1bb75",
   "session_id": "73ec9ead-3f3a-4f21-ad5e-f26ec3d7560f",
-  "response": "Docker Compose adalah alat untuk mendefinisikan dan menjalankan aplikasi Docker multi-container..."
+  "response": "## Pengenalan\nDocker Compose adalah alat...",
+  "whatsapp_text": "*Pengenalan*\nDocker Compose adalah alat..."
 }
 ```
 
@@ -98,6 +99,31 @@ curl -X POST http://localhost:8000/v1/chat/completions \
     "session_id": "73ec9ead-3f3a-4f21-ad5e-f26ec3d7560f",
     "prompt": "Berikan contoh file docker-compose.yaml sederhananya!"
   }'
+```
+
+### 3. Real-time Streaming Response (Server-Sent Events / SSE)
+Tambahkan `"stream": true` dan gunakan flag `-N` (unbuffered) pada `curl` untuk menerima potongan teks secara real-time saat AI sedang mengetik:
+
+```bash
+curl -N -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "stream": true,
+    "prompt": "Jelaskan konsep dasar Quantum Computing dalam 3 paragraf!"
+  }'
+```
+
+**Output Stream (SSE):**
+```text
+data: {"task_id": "a88f1ec7-...", "session_id": null, "status": "started"}
+
+data: {"task_id": "a88f1ec7-...", "delta": "Quantum ", "text": "Quantum "}
+
+data: {"task_id": "a88f1ec7-...", "delta": "computing adalah ", "text": "Quantum computing adalah "}
+
+data: {"task_id": "a88f1ec7-...", "session_id": "73ec9ead-...", "response": "...", "status": "completed"}
+
+data: [DONE]
 ```
 
 ---

@@ -27,7 +27,7 @@ async def get_proxy(r):
     idx = random.randint(0, length - 1)
     return await r.lindex("valid_proxies", idx)
 
-async def process_request(prompt, proxy_str, session_id=None, system_prompt=None):
+async def process_request(prompt, proxy_str, session_id=None, system_prompt=None, task_id=None, r=None):
     """Eksekusi browser dengan proxy, tangani auto-redirect login, dan tangkap response via CDP/Event."""
     sys_instruction = system_prompt
     
@@ -245,12 +245,12 @@ async def process_request(prompt, proxy_str, session_id=None, system_prompt=None
             await page.wait_for_timeout(1500)
             await take_screenshot(page, "5_prompt_sent")
             
-            # Fast Polling teks balasan BARU dari DOM (interval 400ms)
+            # Fast Polling teks balasan BARU dari DOM (interval 250ms)
             final_dom_text = ""
             previous_text = ""
             unchanged_count = 0
 
-            for _ in range(750): # 750 * 400ms = 300 detik max (sesuai API timeout)
+            for _ in range(1200): # 1200 * 250ms = 300 detik max (sesuai API timeout)
                 try:
                     elems = await page.query_selector_all('.ds-assistant-message-main-content, .ds-markdown')
                     # Pastikan elemen balasan BARU telah muncul (jumlah bertambah ATAU teks elemen terakhir berbeda dari sebelum dikirim)
@@ -271,21 +271,38 @@ async def process_request(prompt, proxy_str, session_id=None, system_prompt=None
                             stop_btn = await page.query_selector('div[role="button"]:has-text("Stop"), .ds-stop-button, svg rect[width="12"][height="12"]')
                             is_generating = stop_btn and await stop_btn.is_visible()
                             
-                            if current_text == previous_text:
-                                unchanged_count += 1
-                                # Selesai jika tombol Stop hilang DAN teks tidak berubah selama min 2 detik (5x check @ 400ms = 2s)
-                                if not is_generating and unchanged_count >= 5:
-                                    final_dom_text = current_text
-                                    break
-                                elif unchanged_count >= 10:
-                                    final_dom_text = current_text
-                                    break
-                            else:
-                                unchanged_count = 0
+                            if current_text != previous_text:
+                                # Hitung delta jika teks baru diawali teks lama
+                                if previous_text and current_text.startswith(previous_text):
+                                    delta = current_text[len(previous_text):]
+                                else:
+                                    delta = current_text
+                                    
                                 previous_text = current_text
+                                unchanged_count = 0
+                                
+                                # Publish chunk real-time ke Redis Pub/Sub jika task_id dan r tersedia
+                                if r and task_id and delta:
+                                    try:
+                                        await r.publish(f"stream:{task_id}", json.dumps({
+                                            "type": "chunk",
+                                            "delta": delta,
+                                            "full_text": current_text
+                                        }))
+                                    except Exception as pub_err:
+                                        print(f"Error publishing stream chunk: {pub_err}")
+                            else:
+                                unchanged_count += 1
+                                # Selesai jika tombol Stop hilang DAN teks tidak berubah selama min 1.5 detik (6x check @ 250ms = 1.5s)
+                                if not is_generating and unchanged_count >= 6:
+                                    final_dom_text = current_text
+                                    break
+                                elif unchanged_count >= 12:
+                                    final_dom_text = current_text
+                                    break
                 except Exception:
                     pass
-                await page.wait_for_timeout(400)
+                await page.wait_for_timeout(250)
 
             if final_dom_text:
                 print(f"✅ Balasan AI berhasil diekstrak dari DOM ({len(final_dom_text)} karakter).")
@@ -385,7 +402,9 @@ async def worker_loop():
                 proxy_str = proxy.decode('utf-8')
                 print(f"[{task_id or 'NO_ID'}] Attempt {attempt + 1}/{max_retries} processing prompt: '{prompt[:30]}...' (session: {session_id or 'NEW'}) dengan proxy: {proxy_str}")
                 
-                responses, err, cur_session_id = await process_request(prompt, proxy_str, session_id=session_id, system_prompt=system_prompt)
+                responses, err, cur_session_id = await process_request(
+                    prompt, proxy_str, session_id=session_id, system_prompt=system_prompt, task_id=task_id, r=r
+                )
                 
                 if responses:
                     res_text = str(responses[0])
@@ -395,6 +414,14 @@ async def worker_loop():
                     })
                     if task_id:
                         await r.setex(f"result:{task_id}", 3600, result_payload)
+                        try:
+                            await r.publish(f"stream:{task_id}", json.dumps({
+                                "type": "done",
+                                "session_id": cur_session_id,
+                                "response": res_text
+                            }))
+                        except Exception as e:
+                            print(f"Error publishing stream done: {e}")
                     else:
                         await r.rpush("result_queue", result_payload)
                     success = True
@@ -413,6 +440,13 @@ async def worker_loop():
                 err_text = last_err or "ERROR: Max retries exceeded."
                 if task_id:
                     await r.setex(f"result:{task_id}", 3600, err_text)
+                    try:
+                        await r.publish(f"stream:{task_id}", json.dumps({
+                            "type": "error",
+                            "error": err_text
+                        }))
+                    except Exception as e:
+                        print(f"Error publishing stream error: {e}")
                 else:
                     await r.rpush("result_queue", err_text)
         else:
