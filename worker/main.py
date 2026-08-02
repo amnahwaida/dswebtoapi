@@ -245,30 +245,54 @@ async def process_request(prompt, proxy_str, session_id=None, system_prompt=None
             await page.wait_for_timeout(1500)
             await take_screenshot(page, "5_prompt_sent")
             
-            # Fast Polling teks balasan BARU dari DOM (interval 250ms)
+            # Fast Polling teks balasan BARU dari DOM (interval 300ms)
             final_dom_text = ""
             previous_text = ""
             unchanged_count = 0
 
-            for _ in range(1200): # 1200 * 250ms = 300 detik max (sesuai API timeout)
+            for _ in range(1000): # 1000 * 300ms = 300 detik max (sesuai API timeout)
                 try:
-                    elems = await page.query_selector_all('.ds-assistant-message-main-content, .ds-markdown')
+                    elems = await page.query_selector_all('.ds-assistant-message-main-content, .ds-markdown, .ds-message')
                     # Pastikan elemen balasan BARU telah muncul (jumlah bertambah ATAU teks elemen terakhir berbeda dari sebelum dikirim)
                     if len(elems) > initial_count or (elems and (await elems[-1].inner_text()).strip() != initial_last_text):
                         last_elem = elems[-1]
                         
-                        # Ekstrak teks bersih tanpa bagian "Read web pages / Thinking" dari DeepSeek Search
-                        current_text = await last_elem.evaluate("""el => {
-                            const clone = el.cloneNode(true);
-                            // Hapus elemen pemikir / web search header jika ada
-                            const noise = clone.querySelectorAll('._74c0879, .c2b72bb8, ._60aa7fb, ._8f7678d');
-                            noise.forEach(n => n.remove());
+                        # Ekstrak teks bersih: Prioritaskan .ds-assistant-message-main-content & hapus bagian Thinking/Search Header
+                        current_text = await last_elem.evaluate(r"""el => {
+                            let targetEl = el.querySelector('.ds-assistant-message-main-content');
+                            if (!targetEl && el.classList.contains('ds-assistant-message-main-content')) {
+                                targetEl = el;
+                            }
+                            
+                            const sourceNode = targetEl ? targetEl : el;
+                            const clone = sourceNode.cloneNode(true);
+                            
+                            // Hapus elemen pemikir / web search header berdasarkan selector & class
+                            const selectorsToRemove = [
+                                '._74c0879', '.c2b72bb8', '._60aa7fb', '._8f7678d',
+                                '.ds-think', '[class*="think"]', '[class*="Thought"]',
+                                '.ds-collapsible-area', '.ds-accordion'
+                            ];
+                            selectorsToRemove.forEach(sel => {
+                                try { clone.querySelectorAll(sel).forEach(n => n.remove()); } catch(e) {}
+                            });
+                            
+                            // Filter elemen bertuliskan Thought for ... / Read ... web pages
+                            clone.querySelectorAll('div, span, p').forEach(node => {
+                                const txt = node.innerText ? node.innerText.trim() : '';
+                                if (/^(Thought for \d+ seconds|Read \d+ web pages|Searched \d+ sites|Thinking\.\.\.)/i.test(txt)) {
+                                    node.remove();
+                                }
+                            });
+
                             return clone.innerText.trim();
                         }""")
                         
                         if current_text and current_text != initial_last_text:
                             # Cek indikator apakah AI masih aktif mengetik (tombol Stop)
-                            stop_btn = await page.query_selector('div[role="button"]:has-text("Stop"), .ds-stop-button, svg rect[width="12"][height="12"]')
+                            stop_btn = await page.query_selector(
+                                'div[role="button"]:has-text("Stop"), .ds-stop-button, svg rect[width="12"][height="12"], svg rect[width="14"][height="14"], div[role="button"] svg rect, svg rect[rx="1"]'
+                            )
                             is_generating = stop_btn and await stop_btn.is_visible()
                             
                             if current_text != previous_text:
@@ -293,16 +317,17 @@ async def process_request(prompt, proxy_str, session_id=None, system_prompt=None
                                         print(f"Error publishing stream chunk: {pub_err}")
                             else:
                                 unchanged_count += 1
-                                # Selesai jika tombol Stop hilang DAN teks tidak berubah selama min 1.5 detik (6x check @ 250ms = 1.5s)
-                                if not is_generating and unchanged_count >= 6:
+                                # Selesai HANYA jika tombol Stop hilang DAN teks tidak berubah selama min 4.5 detik (15x check @ 300ms)
+                                # Ini mencegah worker selesai prematur saat R1 sedang transisi dari Thinking ke Answering!
+                                if not is_generating and unchanged_count >= 15:
                                     final_dom_text = current_text
                                     break
-                                elif unchanged_count >= 12:
+                                elif unchanged_count >= 30: # 30 * 300ms = 9 detik jika tombol Stop tidak terdeteksi
                                     final_dom_text = current_text
                                     break
                 except Exception:
                     pass
-                await page.wait_for_timeout(250)
+                await page.wait_for_timeout(300)
 
             if final_dom_text:
                 print(f"✅ Balasan AI berhasil diekstrak dari DOM ({len(final_dom_text)} karakter).")
