@@ -108,7 +108,7 @@ async def process_request(prompt, proxy_str, session_id=None, system_prompt=None
         try:
             target_url = f"https://chat.deepseek.com/a/chat/s/{session_id}" if session_id else "https://chat.deepseek.com"
             print(f"Navigating to {target_url} ...")
-            await page.goto(target_url, timeout=45000, wait_until="domcontentloaded")
+            await page.goto(target_url, timeout=20000, wait_until="domcontentloaded")
             
             # Tunggu elemen UI (baik Chat Input maupun Form Login) selesai dirender oleh SPA React
             try:
