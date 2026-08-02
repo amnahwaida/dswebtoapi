@@ -45,10 +45,10 @@ services:
       - .env
     environment:
       - REDIS_URL=redis://redis:6379
-      - DEEPSEEK_EMAIL=${DEEPSEEK_EMAIL}
-      - DEEPSEEK_PASSWORD=${DEEPSEEK_PASSWORD}
+      - DEEPSEEK_EMAIL=${DEEPSEEK_EMAIL:-}
+      - DEEPSEEK_PASSWORD=${DEEPSEEK_PASSWORD:-}
       - HEADLESS=${HEADLESS:-true}
-      - DEFAULT_SYSTEM_PROMPT=${DEFAULT_SYSTEM_PROMPT}
+      - DEFAULT_SYSTEM_PROMPT=${DEFAULT_SYSTEM_PROMPT:-}
     volumes:
       - ./worker:/app
       - ./screenshots:/app/screenshots
@@ -67,8 +67,10 @@ services:
     restart: unless-stopped
     depends_on:
       - api-gateway
+    env_file:
+      - .env
     environment:
-      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN:-}
     command: tunnel --no-autoupdate run
     networks:
       - seagull_net
