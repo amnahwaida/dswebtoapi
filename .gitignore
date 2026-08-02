@@ -1,0 +1,32 @@
+# Environment variables & secrets
+.env
+*.env
+*.pem
+*.key
+
+# Auth session cookies & tokens
+auth_state.json
+worker/auth_state.json
+
+# Python cache & virtualenv
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+venv/
+.venv/
+
+# Debug screenshots & temporary HTML DOM dumps
+screenshots/
+*.png
+*.jpg
+*.jpeg
+dsafterlogin.html
+dsrespon.html
+halods.html
+responds.html
+respon1.html
+DeepSeek_login.html
+
+# System files
+.DS_Store
